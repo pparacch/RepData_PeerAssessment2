@@ -1,0 +1,190 @@
+```{r echo = FALSE, results="hide"}
+Sys.setlocale("LC_ALL", "C")
+```
+#Weather phenomena with significant consequences in the United States
+
+##Synopsis
+In this report we aim to identify the most significant weather phenomena that are considered most harmful in respect of public health and economy for the United States. 
+
+Analysing the data originated from the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database, including events registered from 1955 to 2011 in the United States, we can see that __TORNADOs__ and __FLOODs__ are the type of events with significat consequence in the United States.
+
+__TORNADOs__ have been the main cause of loss of life and injuries with __96915__ victims (__62% of the total number of victims caused by weather phenomena__). While __FLOODs__ have been the main cause of damages/ economic consequences with a circa __150 billion dollars__ estimated value (__31% of the total estimated damages caused by weather phenomena__).
+
+##Data Processing
+The data is originated from the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of __major storms and weather events__ in the __United States__, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage. The data covers the period from 1955 to 2011.
+
+The data can be download from the following [link][1] in the form of a comma-separated-value file compressed via the bzip2 algorithm. 
+
+__Data Processing Steps__
+
+* Acquire the data
+* Reading in the data
+* Cleaning the data
+* Adding extra features
+* Aggregating the data
+
+###Acquire the data
+Downloading the data as a compressed file in the current working directory.  
+```{r download, cache=TRUE}
+theUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+theFile <- "./stormData.csv.bz2"
+download.file(theUrl, theFile, method = "curl", quiet = TRUE, mode = "wb")
+```
+###Reading in the data
+Read the data included in the compressed file using `read.csv`. When reading the file the options to transfor strings to factor is turned off.
+```{r reading, cache=TRUE}
+rawData <- read.csv(theFile, stringsAsFactors = FALSE)
+```
+###Cleaning the data
+The raw dataset includes __902297 observations (rows)__, each observations including __37 features (columns)__ with the following names.
+```{r dimension}
+dim(rawData)
+names(rawData)
+```
+####Removing not necessary features (columns)
+Not all of the features (columns) are needed in order to answer the questions so the first step is to try to identify a subset of the raw dataset containing only the relevant data.
+
+Based on the [available data documentation][2] and the "questions", we are going to create a simplified raw dataset including the following features (columns):
+
+* type of event (`EVTYPE`)
+* Fatalities/ injuries
+    + direct (`FATALITIES, INJURIES`)
+* damage
+    + property damage information (`PROPDMG, PROPDMGEXP`)
+    + crop damage information (`CROPDMG, CROPDMGEXP`)
+
+The simplified raw dataset allows us to reduce reduce the level complexity, to remove features (columns) not important for the questions we are trying to answer and to increase the performace during the data clean up and transformation. 
+
+```{r simplifiedRawData, collapse = TRUE}
+#simplified raw dataset
+sRawData <- rawData[, c(8,23,24,25,26,27,28)]
+names(sRawData)
+```
+####Preparing selected features (columns)
+Using the `summary` it is possible to have an overview of the content of the raw dataset and NAs.
+```{r summary}
+summary(sRawData)
+```
+```{r nasCounter}
+#Number of NAs by feature (column)
+theCounter <- function(x){
+    return(sum(is.na(x)))
+}
+apply(sRawData, 2, theCounter)
+```
+#####Considerations around `EVTYPE` feature
+Checking the possible values of the `EVTYPE` features (column) we can see that there are 985 possible values (over 902297 observations).
+```{r evtypeInvestigation, collapse=TRUE}
+tmp <- unique(sRawData$EVTYPE)
+length(tmp)
+head(tmp)
+tail(tmp)
+```
+Transforming `ENVTYPE` into a ´factor´ and showing the 10 most frequent event type. 
+```{r evtypeCleanup}
+sRawData$EVTYPE <- as.factor(sRawData$EVTYPE)
+summary(sRawData$EVTYPE, maxsum = 10)
+```
+#####Considerations around `PROPDMGEXP, CRPDMGEXP` features
+__Note!__ From available data documentation:
+* _'Estimates should be rounded to three significant digits, followed by an alphabetical character signifying the magnitude of the number, i.e., 1.55B for $1,550,000,000. Alphabetical characters used to signify magnitude include “K” for thousands, “M” for millions, and “B” for billions.'_
+
+Checking the possible values for the `PROPDMGEXP` feature we can see that it is set to values other that "K", "M" and "B" and (assumption) "" (without magnitude).
+```{r propdmgexpInvestigation, collapse=TRUE}
+tmp <- unique(sRawData$PROPDMGEXP)
+length(tmp)
+tmp
+```
+The actual distribution of such possible values is summarized in the table below.
+```{r propdmgexpInvestigation1}
+table(sRawData$PROPDMGEXP)
+```
+Removing the unexpected values for `PROPDMGEXP` from the dataset.
+```{r propdmgexpCleanup, collapse=TRUE}
+sRawData <- sRawData[sRawData$PROPDMGEXP == "" | sRawData$PROPDMGEXP == "K" | sRawData$PROPDMGEXP == "M" | sRawData$PROPDMGEXP == "B",]
+dim(sRawData)
+unique(sRawData$PROPDMGEXP)
+```
+Same processing is applied for `CRPDMGEXP`.
+```{r cropdmgexpProcessing, collapse=TRUE}
+table(sRawData$CROPDMGEXP)
+sRawData <- sRawData[sRawData$CROPDMGEXP == "" | sRawData$CROPDMGEXP == "K" | sRawData$CROPDMGEXP == "M" | sRawData$CROPDMGEXP == "B",]
+dim(sRawData)
+unique(sRawData$CROPDMGEXP)
+```
+Removing the unexpected values for `PROPDMGEXP, CROPDMGEXP` we have a dataset of __`r dim(sRawData)[1]` obs__, starting from an original dataset of __`r dim(rawData)[1]` obs__.
+
+####Adding extra features
+In order to make simplify the calculation, around impact on public heath and economy, 2 new features, `PROP_DOLLAR` and `CROP_DOLLAR`, have been added to the dataset reprting the damage value in dollars (considering the magnitude).
+```{r extraFeatures}
+sRawData$PROP_DOLLAR <- 0
+sRawData$CROP_DOLLAR <- 0
+
+sRawData[sRawData$PROPDMGEXP == "","PROP_DOLLAR"] <- sRawData[sRawData$PROPDMGEXP == "","PROPDMG"]
+sRawData[sRawData$PROPDMGEXP == "K","PROP_DOLLAR"] <- sRawData[sRawData$PROPDMGEXP == "K","PROPDMG"] * 1000
+sRawData[sRawData$PROPDMGEXP == "M","PROP_DOLLAR"] <- sRawData[sRawData$PROPDMGEXP == "M","PROPDMG"]* 1000000
+sRawData[sRawData$PROPDMGEXP == "B","PROP_DOLLAR"] <- sRawData[sRawData$PROPDMGEXP == "B","PROPDMG"] * 1000000000
+
+sRawData[sRawData$CROPDMGEXP == "","CROP_DOLLAR"] <- sRawData[sRawData$CROPDMGEXP == "","CROPDMG"]
+sRawData[sRawData$CROPDMGEXP == "K","CROP_DOLLAR"] <- sRawData[sRawData$CROPDMGEXP == "K","CROPDMG"] * 1000
+sRawData[sRawData$CROPDMGEXP == "M","CROP_DOLLAR"] <- sRawData[sRawData$CROPDMGEXP == "M","CROPDMG"] * 1000000
+sRawData[sRawData$CROPDMGEXP == "B","CROP_DOLLAR"] <- sRawData[sRawData$CROPDMGEXP == "B","CROPDMG"] * 1000000000
+
+sRawData$TOTAL_DOLLAR <- sRawData$PROP_DOLLAR + sRawData$CROP_DOLLAR 
+sRawData$TOTAL_HEALTH <- sRawData$INJURIES + sRawData$FATALITIES 
+```
+
+####Aggregating the data
+Finally the dataset is ready to be aggregated by `EVTYPE`. Specifically the data is aggregated calculating the total population health and total economic consequences by type of event, and ordered in ascending order by total economic and health impacts respectively.
+```{r aggregatingData}
+healthPerEventType  <- aggregate(TOTAL_HEALTH ~ EVTYPE, data=sRawData, sum)
+economyPerEventType  <- aggregate(TOTAL_DOLLAR ~ EVTYPE, data=sRawData, sum)
+
+healthPerEventType <- healthPerEventType[order(healthPerEventType$TOTAL_HEALTH, decreasing=TRUE),]
+economyPerEventType <- economyPerEventType[order(economyPerEventType$TOTAL_DOLLAR, decreasing=TRUE),]
+```
+##Results
+###Most harmful events with respect to population health
+Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+
+Let´s print out the first total number of victims (injuries + casualties) for the different event types in our dataset, limiting the focus to the 10 top most harmful event types.
+```{r harmfulTable}
+healthPerEventType$PERCENTAGE <- (healthPerEventType$TOTAL_HEALTH/ sum(healthPerEventType$TOTAL_HEALTH)) * 100 
+healthPerEventType[1:10,]
+```
+Plotting the 5 top harmful events types
+```{r harmfulPlot}
+par(mfrow=c(1,2), mar=c(4,4,2,4), cex = 0.6)
+barplot(healthPerEventType[1:5,"TOTAL_HEALTH"], main = "Total number of victims by Event Type (top 5)", names.arg = healthPerEventType[1:5,"EVTYPE"], xlab = "Event Type", ylab = "Total number of victims")
+barplot(healthPerEventType[1:5,"PERCENTAGE"], main = "Percentage on overall victims by Event Type (top 5)", names.arg = healthPerEventType[1:5,"EVTYPE"], xlab = "Event Type", ylab = "Percentage", ylim = c(0, 100))
+```  
+
+We can see that across the United States the most harmful event type with respect to population health is the __TORNADO__. 
+
+###Events with greatest economic consequences
+Across the United States, which types of events have the greatest economic consequences?
+
+Let´s print out the first total cost (economic consequences) for the different event types in our dataset, limiting the focus to the 10 top most expensive event types.
+```{r economyTable}
+economyPerEventType$PERCENTAGE <- (economyPerEventType$TOTAL_DOLLAR / sum(economyPerEventType$TOTAL_DOLLAR)) * 100
+economyPerEventType[1:10,]
+```
+Plotting the 5 top most expensive event types
+```{r economyPlot}
+tmp <- economyPerEventType[1:5,]
+tmp$TOTAL_DOLLAR <- tmp$TOTAL_DOLLAR / 1000000000 #Convert to Billions of dollar
+
+par(mfrow=c(1,2), mar=c(4,4,2,4), cex = 0.6)
+barplot(tmp[,"TOTAL_DOLLAR"], main = "Total cost by Event Type (top 5)", names.arg = tmp[,"EVTYPE"], xlab = "Event Type", ylab = "Billions of dollars")
+barplot(tmp[,"PERCENTAGE"], main = "Percentage on overall cost by Event Type (top 5)", names.arg = tmp[,"EVTYPE"], xlab = "Event Type", ylab = "Percentage", ylim = c(0, 100))
+```  
+
+We can see that across the United States the event type with the greatest economic consequences is the __FLOOD__.
+
+##Software Environment Information
+```{r environment, echo = FALSE}
+sessionInfo()
+```
+
+[1]:https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2 "data"
+[2]:https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf "dataDocumentation"
